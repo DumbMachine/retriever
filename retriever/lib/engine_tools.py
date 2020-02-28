@@ -17,6 +17,8 @@ from retriever.lib.defaults import HOME_DIR, ENCODING
 import xml.etree.ElementTree as ET
 import os
 import csv
+import pandas as pd
+from pandas.io.json import json_normalize
 
 warnings.filterwarnings("ignore")
 from retriever.lib.tools import open_fr, open_csvw, open_fw
@@ -101,35 +103,68 @@ def reset_retriever(scope="all", ask_permission=True):
             print("can't find script {scp}".format(scp=scope))
 
 
-def json2csv(input_file, output_file=None, header_values=None, encoding=ENCODING):
+def json2csv(input_file, output_file=None, header_values=None, encoding=ENCODING, row_key=None):
     """Convert Json file to CSV.
 
-    Function is used for only testing and can handle the file of the size.
+    Converts a given Json file to pandas dataframe and then converts it to csv file.
     """
     file_out = open_fr(input_file, encoding=encoding)
-    # set output file name and write header
+    # set output file name
     if output_file is None:
         output_file = os.path.splitext(os.path.basename(input_file))[0] + ".csv"
-    csv_out = open_fw(output_file, encoding=encoding)
-    if os.name == 'nt':
-        outfile = csv.DictWriter(csv_out,
-                                 dialect='excel',
-                                 escapechar="\\",
-                                 lineterminator='\n',
-                                 fieldnames=header_values)
+    # Find the part of json, where the key contains items for each row of csv
+    dictionary = json.load(file_out)
+    rows = walker(dictionary, row_key=row_key, header_values=header_values, rows=[], normalize=False)
+    if not len(rows):
+        raise Exception("Could'nt Parse the Json")
+    df = pd.DataFrame(rows, columns=header_values)
+    if header_values:
+        df.to_csv(output_file, index=False, header=True, encoding=encoding)
     else:
-        outfile = csv.DictWriter(csv_out,
-                                 dialect='excel',
-                                 escapechar="\\",
-                                 fieldnames=header_values)
-    raw_data = json.loads(file_out.read())
-    outfile.writeheader()
+        df.to_csv(output_file, index=False, header=False, encoding=encoding)
 
-    for item in raw_data:
-        outfile.writerow(item)
-    file_out.close()
-    subprocess.call(['rm', '-r', input_file])
+
     return output_file
+
+
+def walker(dictionary, row_key=None, header_values=None, rows=[], normalize=False):
+    """
+    Both name and columns cant be none
+    """
+    #  Handles the simple case, where row_key and column_key are not required
+    if not row_key and not header_values:
+        if isinstance(dictionary, dict):
+            # rows = pd.Series(dictionary)
+            rows = pd.DataFrame([dictionary])
+            return rows
+        elif isinstance(dictionary, list):
+            rows = pd.DataFrame(dictionary, columns=header_values)
+            return rows
+
+    if isinstance(dictionary, dict):
+        if header_values and (header_values in list(dictionary.keys()) or header_values == list(dictionary.keys())):
+            if normalize:
+                rows.extend(json_normalize(dict(i for i in dictionary.items() if i[0] in header_values)).values)
+            else:
+                rows.extend([dict(i for i in dictionary.items() if i[0] in header_values)])
+
+        elif row_key and row_key in list(dictionary.keys()):
+            if normalize:
+                rows.extend(json_normalize(dictionary[row_key]).values)
+            else:
+                rows.extend(dictionary[row_key])
+
+        else:
+            for _, item in dictionary.items():
+                if isinstance(item, list):
+                    for ls in item:
+                        rows = walker(ls, row_key, header_values, rows)
+
+    if isinstance(dictionary, list):
+        for item in dictionary:
+            rows = walker(item, row_key, header_values, rows, normalize=True)
+
+    return rows
 
 
 def xml2csv(input_file, outputfile=None, header_values=None, row_tag="row"):
