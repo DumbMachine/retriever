@@ -105,25 +105,34 @@ def reset_retriever(scope="all", ask_permission=True):
 
 def json2csv(input_file, output_file=None, header_values=None, encoding=ENCODING, row_key=None):
     """Convert Json file to CSV.
-
-    Converts a given Json file to pandas dataframe and then converts it to csv file.
+    Function is used for only testing and can handle the file of the size.
     """
     file_out = open_fr(input_file, encoding=encoding)
-    # set output file name
+    # set output file name and write header
     if output_file is None:
         output_file = os.path.splitext(os.path.basename(input_file))[0] + ".csv"
-    # Find the part of json, where the key contains items for each row of csv
-    dictionary = json.load(file_out)
-    rows = walker(dictionary, row_key=row_key, header_values=header_values, rows=[], normalize=False)
-    if not len(rows):
-        raise Exception("Could'nt Parse the Json")
-    df = pd.DataFrame(rows, columns=header_values)
-    if header_values:
-        df.to_csv(output_file, index=False, header=True, encoding=encoding)
+    csv_out = open_fw(output_file, encoding=encoding)
+    if os.name == 'nt':
+        outfile = csv.writer(csv_out,
+                                 dialect='excel',
+                                 escapechar="\\",
+                                 lineterminator='\n',
+                                #  fieldnames=header_values)
+                                )
     else:
-        df.to_csv(output_file, index=False, header=False, encoding=encoding)
-
-
+        outfile = csv.writer(csv_out,
+                                 dialect='excel',
+                                 escapechar="\\",
+                                #  fieldnames=header_values)
+                                )
+    raw_data = json.loads(file_out.read())
+    raw_data = walker(raw_data, row_key=row_key, header_values=header_values, rows=[], normalize=False)
+    raw_data = [row.tolist() for row in raw_data]
+    # outfile.writeheader()
+    outfile.writerow(header_values)
+    outfile.writerows(raw_data)
+    file_out.close()
+    subprocess.call(['rm', '-r', input_file])
     return output_file
 
 
@@ -135,10 +144,10 @@ def walker(dictionary, row_key=None, header_values=None, rows=[], normalize=Fals
     if not row_key and not header_values:
         if isinstance(dictionary, dict):
             # rows = pd.Series(dictionary)
-            rows = pd.DataFrame([dictionary])
+            rows = pd.DataFrame([dictionary]).values
             return rows
         elif isinstance(dictionary, list):
-            rows = pd.DataFrame(dictionary, columns=header_values)
+            rows = pd.DataFrame(dictionary, columns=header_values).values
             return rows
 
     if isinstance(dictionary, dict):
